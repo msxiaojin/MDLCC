@@ -65,8 +65,8 @@ for i_file  = 1:  length(dirents)
     save(image_filename,'im');
     imwrite(image, fullfile(output_folder, num2str(i_file, '%06d.png')));
 
-    illuminants_filename = fullfile(output_folder, num2str(i_file, '%06d_gt.mat'));
+    illuminants_name = fullfile(output_folder, num2str(i_file, '%06d_gt.mat'));
     gt = illuminant;
-    save(illuminants_filename, 'gt');
+    save(illuminants_name, 'gt');
 end
 
