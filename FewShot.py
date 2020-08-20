@@ -81,8 +81,8 @@ class fewshot(object):
         print( 'cross validation fold: %d\t training numbers %d\t '%(cv_fold,len(self.train_lists)))
         shuffle( self.train_lists)
         
-        # gt_hist_map = gt_hist_generation( self.Names,cv_fold )
-        # self.gt_hist_map = gt_hist_map
+        
+        
         print(self.model_path)
         if not os.path.exists(self.model_path):
             os.mkdir(self.model_path)
@@ -97,8 +97,8 @@ class fewshot(object):
                 train_input_single  = tf.placeholder(tf.float32, shape=(self.IMG_SIZE[0], self.IMG_SIZE[1], 3))
                 train_gt_single  	= tf.placeholder(tf.float32, shape=(3,))
                 train_idx_single    = tf.placeholder(tf.float32, shape=(self.Num,))
-                # train_gtmap_single  = tf.placeholder(tf.float32, shape=(64,64,1))
-                # fn_single           = tf.placeholder(tf.string)
+                
+                
                 q = tf.FIFOQueue(200, [tf.float32, tf.float32,tf.float32], 
                                                 [[self.IMG_SIZE[0], self.IMG_SIZE[1], 3],
                                                 [3],[self.Num]])
@@ -113,7 +113,7 @@ class fewshot(object):
                                     self.Num,  self.aug_ill)
              
 
-            # build model for multitask training
+            # build model, set trainable to False, except for camera-specific params
             train_output,net  = build_adaptive_mtl(self.train_input,self.train_idx,self.prob,
                                                 reuse=self.reuse, scope='fc4_cv%d'%(cv_fold),trainable = False)
             
@@ -130,8 +130,8 @@ class fewshot(object):
             all_vars = tf.get_collection(tf.GraphKeys.GLOBAL_VARIABLES, 
                        scope=tf.get_variable_scope().name)
 
-            all_train_vars = tf.trainable_variables()
-            self.all_vars = all_vars[1:]
+            all_train_vars = tf.trainable_variables() # denote the camera-specific params
+            self.all_vars = all_vars[1:] # remove the first one, which is global_step
             for var in all_train_vars:
                 print(var.name)
                 total_loss += tf.nn.l2_loss(var)*1e-4
@@ -141,24 +141,8 @@ class fewshot(object):
                                                             values=[0.0001,0.0001,0.0001])
             optimizer = tf.train.AdamOptimizer(learning_rate=learning_rate,name='cv_%d'%cv_fold ) 
             opt   = optimizer.minimize(total_loss,  global_step=global_step, var_list= all_train_vars,name='opt_%d'%cv_fold)
-            # if using different lr for each layer
-            '''
-            fc_weights = tf.get_collection(tf.GraphKeys.TRAINABLE_VARIABLES, scope='cam*')
-            conv_weights = all_vars 
-            conv_weights.remove( fc_weights[0] )
-            conv_weights.remove( fc_weights[1] )
-            opt1 = tf.train.AdamOptimizer(self.learning_rate *0.1 ) #实例化一个优化函数？如adam
-            opt2 = tf.train.AdamOptimizer(self.learning_rate )
-            grads = tf.gradients(total_loss, conv_weights + fc_weights) #tf.gradients(ys,xs)实现ys对xs求导
-            grads1 = grads[:len(conv_weights)]
-            grads2 = grads[len(conv_weights):]
-            train_op1 = opt1.apply_gradients(list(zip(grads1, conv_weights))) # apply_gradients将计算出的梯度应用到变量上
-            train_op2 = opt2.apply_gradients(list(zip(grads2, fc_weights)))
-            opt = tf.group(train_op1, train_op2)
-            '''
+
             # define saver
-            all_vars = tf.get_collection(tf.GraphKeys.GLOBAL_VARIABLES, 
-                       scope=tf.get_variable_scope().name)
             self.saver = tf.train.Saver(self.all_vars,global_step, max_to_keep=0)
             
         # training
@@ -176,24 +160,24 @@ class fewshot(object):
             model_lists = sorted(glob.glob(os.path.join(self.model_path,"*epoch_*.meta")))
 
             if model_lists:
-                # load previous training model
+                # if model_path not empty, continue training by loading previous model
                 model_names = [int(i.split('epoch_')[1].split('.ckpt')[0]) for i in model_lists]
                 model_names.sort()
                 start = model_names[-1]
                 print( "restore model from epoch %d\t"%(start))
                 model_name = os.path.join(self.model_path, 'fc4_epoch_%03d.ckpt'%(start) )
                 self.saver.restore(sess,model_name)
-            else: # load meta model
+            else: # if empty model_path, then load meta model
                 meta_lists = sorted(glob.glob(os.path.join(self.meta_path,"*epoch_*.meta")))
                 meta_names = [int(i.split('epoch_')[1].split('.ckpt')[0]) for i in meta_lists]
                 meta_names.sort()
                 meta_ckpt  = os.path.join(self.meta_path,'fc4_epoch_%d.ckpt'%(meta_names[-1]))
                 self.saver.restore(sess,meta_ckpt)
                 
-                print(sess.run(all_train_vars[0]))
+                # initialize the camera-specific weights, instead of inheriting from meta-model 
                 all_train_vars[0] = tf.assign( all_train_vars[0],np.random.rand(1,1,7,24576) )
                 all_train_vars[1] = tf.assign( all_train_vars[1],np.random.rand(1,1,7,4096) )
-                print(sess.run(all_train_vars[0]))
+                
 
             ### WITH ASYNCHRONOUS DATA LOADING ###
             threads = []
@@ -398,14 +382,19 @@ def parse_args():
     # parser.add_argument('--camera',type=str,default = 'all')
     parser.add_argument('--cv',dest='cv_index',type = int,default = 2)
     parser.add_argument('--gpu', dest='gpu_id', type=str, default='0')
-    parser.add_argument('--k',dest='K',type=int,default=1)
+    parser.add_argument('--k',dest='K',type=int,default=1) # number of few shot training samples
     parser.add_argument('--epoch',dest='MAX_EPOCH',type=int,default=1000)
-    parser.add_argument('--tag',dest='tag',type=str,default='Cube_old',help='CCD or NUS1 or Cube_old')
+    parser.add_argument('--tag',dest='tag',type=str,default='Cube_old',help='CCD or NUS1 or Cube_old') # test set
     parser.add_argument('--seed',dest='seed',type=int,default=0,help='random seed')
     args = parser.parse_args()
     return args
 
 if __name__ == '__main__':
+    # For few-shot evaluation, first run FewShot.py --cv 0, and FewShot.py --cv 1 
+    # which will re-train the meta-model, on cross validation set 0&1
+    # then run FewShot.py --cv 2, which will retrain the meta-model on cross validation set_2
+    # and also perform validation on test dataset
+
     # set params
     args = parse_args()
     args.IMG_SIZE = (512, 512)
@@ -413,7 +402,7 @@ if __name__ == '__main__':
     args.BASE_LR = 0.0001
     os.environ["CUDA_VISIBLE_DEVICES"] = args.gpu_id
 
-    # set up the meta camera names
+    # set up the meta camera names, the meta-model is trained using awb_demo.py with following camera_names
     meta_cam_names = ['NUS_ChengCanon600D','NUS_ChengFujifilmXM1','NUS_ChengNikonD5200',
                     'NUS_ChengOlympusEPL6','NUS_ChengPanasonicGX1','NUS_ChengSamsungNX2000',
                     'NUS_ChengSonyA57',]
@@ -430,21 +419,22 @@ if __name__ == '__main__':
     awb.testsize = [1359,2041]
     awb.seed = args.seed 
     
-    # train meta model
+    # load meta model
     K = args.K
     awb.reuse = False
 
     i_cv = args.cv_index
     awb.save_name = 'fewshot_'+tag +'_K%d_cv_%d'%(K,i_cv)
     awb.model_path = os.path.join('.//fewshot//','fewshot_'+tag +'_seed%d_K%d_cv_%d'%(awb.seed,K,i_cv))
-    awb.meta_path  = os.path.join('.//fewshot','FW_'+tag+'_meta_cv_%d'%(i_cv))
+    awb.meta_path  = os.path.join('.//fewshot','FW_meta_cv_%d'%(i_cv))
     
+    # few-shot training model
     if K:
         awb.fewshot_train(i_cv,K)
         awb.reuse = True
 
     
-
+    # if i_cv ==2, perform few-shot evaluation
     errs = []
     if i_cv == 2:
         for cv_fold in range(3):
