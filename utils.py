@@ -158,7 +158,7 @@ def data_augment(train_batch,gt_batch, idx_batch, IMG_SIZE,bs, Num,aug_ill):
             th_idx = tf.reshape(idx_batch[i_batch,:],(1,1,1,Num))
             # illuminant augment by relighting image and gt illuminant, accordingly
             th_crop   = th_crop * tf.reshape(aug_ill[:,i_batch],(1,1,3))
-            th_gt     = np.multiply( th_gt , aug_ill[:,i_batch] )
+            th_gt     = tf.multiply( th_gt , aug_ill[:,i_batch] )
             th_gt     = tf.nn.l2_normalize(th_gt,axis=-1)
 
             if i_batch  == 0:
